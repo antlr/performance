@@ -12,6 +12,7 @@ rm -rf /tmp/grammars-v4-master
 unzip -q grammars-v4.zip
 cd $BASE
 echo "Copy sample grammars and input"
+mkdir grammars
 cp /tmp/grammars-v4-master/java/java/*.g4 \
    /tmp/grammars-v4-master/sql/postgresql/*.g4 \
    /tmp/grammars-v4-master/sparql/*.g4 \
