@@ -5,7 +5,7 @@ Parser performance for the same grammar across code generation targets varies a 
 1. raw performance of the underlying implementation language, such as python versus C++
 2. the runtime support library must be carefully tuned, such as we did for the Java target; e.g., the [hash function](https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/atn/ATNConfigSet.java#L47) used has to be appropriate for our unusual use case
 
-It's also the case that different grammars for the same language can't be radically different performance. For example, in the [OOPSLA paper](https://dl.acm.org/doi/pdf/10.1145/2660193.2660202) we compared the performance of two different grammars for Java. The grammar from the Java language specification converted to ANTLR notation one to one performed much worse than one we hand tune to reduce lookahead requirements.
+It's also the case that different grammars for the same language can exhibit radically different performance. For example, in the [OOPSLA paper](https://dl.acm.org/doi/pdf/10.1145/2660193.2660202) we compared the performance of two different grammars for Java. The grammar from the Java language specification converted to ANTLR notation one to one performed much worse than one we hand tune to reduce lookahead requirements.
 
 *A note on testing the performance of ANTLR parsers.* ANTLR v4 generates ALL(\*) parsers, which use a form of decision caching in order to improve future performance on the same or similar input statements.  That implies there is a warm up period associated with the parsers before they reach their final throughput speed, and of course, Java's JIT also has a warm up period (if using the Java target).
 
