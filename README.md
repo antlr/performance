@@ -110,3 +110,24 @@ The parser needs 12 tokens of lookahead because of the way the grammar is expres
 <img width="150" alt="Screen Shot 2022-02-07 at 11 28 33 AM" src="https://user-images.githubusercontent.com/178777/152858185-cac8af97-3a6e-42cb-a077-27f4783c3134.png">
 
 There are multiple statements that either start with the same left prefix or are variations on a `create` statement. In this case, it looks like the parser is scanning the entire statement until the semicolon before deciding between the various grammatical forms. SQL is a very complex (or big at least) language and so merging grammatical rules might put a larger burden on a semantic analyzer phase and might also make the grammar less readable. This is a trade off to keep in mind when either designing languages or implementing grammars. :)
+
+For example, let's say we have a simple rule in isolation that is very similar looking from the left edge:
+
+```
+create
+    :    'create' 'table' ID '(' ID 'integer' ')' ';'
+    |    'create' 'table' ID '(' ')' ';'
+    ;
+```
+
+ALL(\*) has no problem with that rule; it just dynamically scans ahead until it can distinguish the alternatives of any decision it faces. The cost is having to look ahead to the token beyond '(' in order to make a decision. In this case, it looks ahead 5 tokens.
+
+Without changing the language recognized, we can left factor and collapse the alternatives of that rule so that it needs only one symbol of look ahead to match the optional `(ID 'integer')?` subrule:
+
+```
+create
+    :    'create' 'table' ID '(' (ID 'integer')? ')' ';'
+    ;
+```
+
+But, of course, this grammar might be less easy to read. The language is the same but we have expressed it differently to improve performance; the usual trade off in optimizations.
