@@ -1,4 +1,4 @@
-ANTLR_JAR="`pwd`/lib/antlr4.10-SNAPSHOT-complete.jar"
+ANTLR_JAR="`pwd`/lib/antlr-4.10.1-complete.jar"
 
 N="10"
 

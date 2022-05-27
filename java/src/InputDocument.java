@@ -3,7 +3,8 @@ public class InputDocument {
 	char[] content;
 	int index; // set by getRandomDocuments
 	int nlines;
-    long time;
+	long time;
+	long heapUsed;
     int beforeDFASize; // gets bigger as we build new DFA; total after we parse a document
     int afterDFASize; // gets bigger as we build new DFA; total after we parse a document
 

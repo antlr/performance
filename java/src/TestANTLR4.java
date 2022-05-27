@@ -22,6 +22,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -149,6 +151,11 @@ class TestANTLR4 {
 
 	// return num ns to parse all docs
 	public long parseDocs(List<InputDocument> docs) throws Exception {
+		System.gc();
+		MemoryMXBean mbean = ManagementFactory.getMemoryMXBean();
+		long startUsed, stopUsed;
+		startUsed = mbean.getHeapMemoryUsage().getUsed();
+
 		long start = System.nanoTime();
 		int nlines = 0;
 		long nchar = 0;
@@ -165,9 +172,11 @@ class TestANTLR4 {
 		long stop = System.nanoTime();
 		long tms = (long)((stop - start) / (1000.0 * 1000.0));
 		double ts = tms / 1000.0;
-		System.out.printf("Parsed %d files %,d lines %,d bytes in %4dms at %,9d lines/sec %,d chars/sec\n",
-						  docs.size(), nlines, nchar, tms, (int)(nlines / ts), (int)(nchar/ts));
 		System.gc();
+		stopUsed = mbean.getHeapMemoryUsage().getUsed();
+		long heapUsed = stopUsed - startUsed;
+		System.out.printf("Parsed %d files %,d lines %,d bytes in %4dms at %,9d lines/sec %,10d chars/sec rel heap %,d\n",
+						  docs.size(), nlines, nchar, tms, (int)(nlines / ts), (int)(nchar/ts), heapUsed);
 //		if ( LL_required>0 ) {
 //			System.out.printf("Full LL parsing required in %d decisions\n", LL_required);
 //		}
