@@ -1,4 +1,5 @@
 ANTLR_JAR="`pwd`/lib/antlr-4.10.1-complete.jar"
+HEAP_JAR="`pwd`/lib/hprof-heap-0.16.jar"
 BASE=`pwd`
 
 if [ ! -f /tmp/grammars-v4.zip ]
@@ -33,5 +34,5 @@ cd $BASE/src
 
 echo
 echo "Compiling parsers and test rig"
-javac -cp $ANTLR_JAR:$CLASSPATH -d ../out *.java ../grammars/*.java
+javac -cp $ANTLR_JAR:$HEAP_JAR:$CLASSPATH -d ../out *.java ../grammars/*.java
 cd $BASE

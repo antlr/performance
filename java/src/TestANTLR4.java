@@ -1,3 +1,4 @@
+import com.sun.management.HotSpotDiagnosticMXBean;
 import org.antlr.v4.runtime.ANTLRInputStream;
 import org.antlr.v4.runtime.BailErrorStrategy;
 import org.antlr.v4.runtime.CharStream;
@@ -16,8 +17,20 @@ import org.antlr.v4.runtime.atn.PredictionMode;
 import org.antlr.v4.runtime.dfa.DFA;
 import org.antlr.v4.runtime.dfa.DFAState;
 import org.antlr.v4.runtime.misc.NotNull;
+import org.antlr.v4.runtime.misc.Pair;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 
+import org.gridkit.jvmtool.heapdump.HeapClusterAnalyzer;
+import org.gridkit.jvmtool.heapdump.HeapClusterAnalyzer.ClusterDetails;
+import org.gridkit.jvmtool.heapdump.HeapHistogram;
+import org.gridkit.jvmtool.heapdump.HeapHistogram.ClassRecord;
+import org.gridkit.jvmtool.heapdump.StringCollector;
+import org.netbeans.lib.profiler.heap.Heap;
+import org.netbeans.lib.profiler.heap.HeapFactory;
+import org.netbeans.lib.profiler.heap.HeapSummary;
+import org.netbeans.lib.profiler.heap.Instance;
+
+import javax.management.MBeanServer;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -28,6 +41,9 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.file.Path;
+import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -152,14 +168,16 @@ class TestANTLR4 {
 	// return num ns to parse all docs
 	public long parseDocs(List<InputDocument> docs) throws Exception {
 		System.gc();
-		MemoryMXBean mbean = ManagementFactory.getMemoryMXBean();
-		long startUsed, stopUsed;
-		startUsed = mbean.getHeapMemoryUsage().getUsed();
+		String heapFileName = dumpHeap("/tmp/test-heapdump", true);
+		Pair<Long, Long> beforeStats = heapStats(heapFileName);
+
+		//		MemoryMXBean mbean = ManagementFactory.getMemoryMXBean();
+//		long startUsed, stopUsed;
+//		startUsed = mbean.getHeapMemoryUsage().getUsed();
 
 		long start = System.nanoTime();
 		int nlines = 0;
 		long nchar = 0;
-		System.gc();
 		LL_required = 0;
 		for (InputDocument doc : docs) {
 			if ( wipeFileDFA ) { // wipe DFA for lexer/parser before each file parse?
@@ -172,15 +190,42 @@ class TestANTLR4 {
 		long stop = System.nanoTime();
 		long tms = (long)((stop - start) / (1000.0 * 1000.0));
 		double ts = tms / 1000.0;
+//		stopUsed = mbean.getHeapMemoryUsage().getUsed();
+//		long heapUsed = stopUsed - startUsed;
+
 		System.gc();
-		stopUsed = mbean.getHeapMemoryUsage().getUsed();
-		long heapUsed = stopUsed - startUsed;
-		System.out.printf("Parsed %d files %,d lines %,d bytes in %4dms at %,9d lines/sec %,10d chars/sec rel heap %,d\n",
-						  docs.size(), nlines, nchar, tms, (int)(nlines / ts), (int)(nchar/ts), heapUsed);
-//		if ( LL_required>0 ) {
-//			System.out.printf("Full LL parsing required in %d decisions\n", LL_required);
-//		}
+		heapFileName = dumpHeap("/tmp/test-heapdump", true);
+		Pair<Long, Long> afterStats = heapStats(heapFileName);
+		Pair<Long, Long> stats = new Pair<>(afterStats.a - beforeStats.a, afterStats.b - beforeStats.b);
+
+		System.out.printf("Parsed %d files %,d lines %,d bytes in %4dms at %,9d lines/sec %,10d chars/sec, heap %,d, instances %,d\n",
+						  docs.size(), nlines, nchar, tms, (int)(nlines / ts), (int)(nchar/ts), stats.a, stats.b);
 		return stop - start;
+	}
+
+	/** Dump heap tracing (live or all) objects to a .hprof file.
+	 *
+	 * @param baseFileName Pass in "/tmp/mydump" and this will add .hprof and a timestamp.
+	 * @throws IOException
+	 */
+	public static String dumpHeap(String baseFileName, boolean live) throws IOException {
+		MBeanServer server = ManagementFactory.getPlatformMBeanServer();
+		HotSpotDiagnosticMXBean mxBean = ManagementFactory.newPlatformMXBeanProxy(
+				server, "com.sun.management:type=HotSpotDiagnostic", HotSpotDiagnosticMXBean.class);
+		SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd_HH:mm:ss.SSS");
+		String timestamp = formatter.format(new Timestamp(System.currentTimeMillis()));
+		String fileName = baseFileName+"-"+timestamp+".hprof";
+		mxBean.dumpHeap(fileName, live);
+		return fileName;
+	}
+
+	public static Pair<Long,Long> heapStats(String heapFileName) throws IOException {
+		Heap heap = HeapFactory.createFastHeap(new File(heapFileName));
+		HeapHistogram histogram = new HeapHistogram();
+		for (Instance i : heap.getAllInstances()) {
+			histogram.accumulate(i);
+		}
+		return new Pair<>(histogram.getTotalCount(), histogram.getTotalSize());
 	}
 
 	// This method decides what action to take based on the type of
