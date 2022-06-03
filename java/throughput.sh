@@ -1,4 +1,4 @@
-ANTLR_JAR="`pwd`/lib/antlr-4.10.1-complete.jar"
+ANTLR_JAR="`pwd`/lib/antlr-4.10.2-SNAPSHOT-complete.jar"
 HEAP_JAR="`pwd`/lib/hprof-heap-0.16.jar"
 
 N="10"

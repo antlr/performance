@@ -7,27 +7,19 @@ import org.antlr.v4.runtime.ConsoleErrorListener;
 import org.antlr.v4.runtime.DefaultErrorStrategy;
 import org.antlr.v4.runtime.Lexer;
 import org.antlr.v4.runtime.Parser;
-import org.antlr.v4.runtime.ParserRuleContext;
-import org.antlr.v4.runtime.RuleContext;
 import org.antlr.v4.runtime.TokenStream;
 import org.antlr.v4.runtime.atn.ATN;
 import org.antlr.v4.runtime.atn.LexerATNSimulator;
 import org.antlr.v4.runtime.atn.ParserATNSimulator;
 import org.antlr.v4.runtime.atn.PredictionMode;
 import org.antlr.v4.runtime.dfa.DFA;
-import org.antlr.v4.runtime.dfa.DFAState;
-import org.antlr.v4.runtime.misc.NotNull;
 import org.antlr.v4.runtime.misc.Pair;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 
-import org.gridkit.jvmtool.heapdump.HeapClusterAnalyzer;
-import org.gridkit.jvmtool.heapdump.HeapClusterAnalyzer.ClusterDetails;
+import org.antlr.v4.runtime.misc.Triple;
 import org.gridkit.jvmtool.heapdump.HeapHistogram;
-import org.gridkit.jvmtool.heapdump.HeapHistogram.ClassRecord;
-import org.gridkit.jvmtool.heapdump.StringCollector;
 import org.netbeans.lib.profiler.heap.Heap;
 import org.netbeans.lib.profiler.heap.HeapFactory;
-import org.netbeans.lib.profiler.heap.HeapSummary;
 import org.netbeans.lib.profiler.heap.Instance;
 
 import javax.management.MBeanServer;
@@ -36,12 +28,10 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.management.ManagementFactory;
-import java.lang.management.MemoryMXBean;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.nio.file.Path;
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -81,11 +71,10 @@ class TestANTLR4 {
 	public int ntimes = 1;
 
 	public List<Long> timings = new ArrayList<Long>();
-
-	int LL_required = 0;
+	public List<Long> liveHeapInstanceCounts = new ArrayList<Long>();
+	public List<Long> liveHeapSizes = new ArrayList<Long>();
 
 	public static Option[] optionDefs = {
-		new Option("SLL",	"-SLL", "force pure SLL parsing w/o possibility of failover to LL"),
 		new Option("inputFilePattern",	"-files", OptionArgType.STRING, "input files; e.g., '.*\\\\.java'"),
 		new Option("showFileNames",	"-showfiles", "show file names as they are parsed"),
 		new Option("showTokens",	"-tokens", "show input tokens"),
@@ -113,39 +102,46 @@ class TestANTLR4 {
 
 	public void go(String[] args) throws Exception {
 		handleArgs(args);
-		if (inputFiles.size() > 0 ) {
-			List<String> allFiles = new ArrayList<String>();
-			for (String fileName : inputFiles) {
-				List<String> files = getFilenames(new File(fileName));
-				allFiles.addAll(files);
-			}
-			loadLexerParser();
-			List<InputDocument> docs = load(allFiles);
-			long minTime = Long.MAX_VALUE;
-			for (int i=1; i<=ntimes; i++) {
-				if ( wipeDFA ) { // wipe DFA for lexer/parser before each pass?
-					wipe();
-				}
-				long time = parseDocs(docs);
-				minTime = Math.min(time, minTime);
-				timings.add((long)(time/1000.0/1000.0)); // get into ms
-			}
-			// timing info will show results of last pass over documents
-			if ( showDocTiming ) {
-				for (InputDocument doc : docs) {
-					System.out.printf("%d %d %d %d %s\n",
-									  doc.content.length, doc.time, doc.beforeDFASize, doc.afterDFASize, doc.fileName);
-				}
-			}
-
-			// skip first 2 for compiler
-			if ( timings.size()>3 ) {
-				timings = timings.subList(3, timings.size());
-			}
-			double mean = avg(timings);
-			double timingStd = std(mean, timings);
-			System.out.printf("average parse %.3fms, min %.3fms, stddev=%.3fms (First 3 runs skipped for JIT warmup)\n", mean, (minTime / (1000.00 * 1000.00)), timingStd);
+		if (inputFiles.size() == 0 ) {
+			return;
 		}
+
+		List<String> allFiles = new ArrayList<>();
+		for (String fileName : inputFiles) {
+			List<String> files = getFilenames(new File(fileName));
+			allFiles.addAll(files);
+		}
+		loadLexerAndParser();
+		List<InputDocument> docs = load(allFiles);
+		long minTime = Long.MAX_VALUE;
+		for (int i=1; i<=ntimes; i++) {
+			if ( wipeDFA ) { // wipe DFA for lexer/parser before each pass?
+				wipe();
+			}
+			Triple<Long, Long, Long> stats = parseDocs(docs);
+			long time = stats.a;
+			long instances = stats.b;
+			long heapSize = stats.c;
+			minTime = Math.min(time, minTime);
+			timings.add((long)(time/1000.0/1000.0)); // get into ms
+			liveHeapInstanceCounts.add(instances);
+			liveHeapSizes.add(heapSize);
+		}
+		// timing info will show results of last pass over documents
+		if ( showDocTiming ) {
+			for (InputDocument doc : docs) {
+				System.out.printf("%d %d %d %d %s\n",
+								  doc.content.length, doc.time, doc.beforeDFASize, doc.afterDFASize, doc.fileName);
+			}
+		}
+
+		// skip first 2 for compiler
+		if ( timings.size()>3 ) {
+			timings = timings.subList(3, timings.size());
+		}
+		double mean = avg(timings);
+		double timingStd = std(mean, timings);
+		System.out.printf("average parse %.3fms, min %.3fms, stddev=%.3fms (First 3 runs skipped for JIT warmup)\n", mean, (minTime / (1000.00 * 1000.00)), timingStd);
 	}
 
 	public double avg(List<Long> values) {
@@ -164,21 +160,15 @@ class TestANTLR4 {
 		return Math.sqrt(sum / (values.size() - 1));
 	}
 
-
 	// return num ns to parse all docs
-	public long parseDocs(List<InputDocument> docs) throws Exception {
+	public Triple<Long, Long, Long> parseDocs(List<InputDocument> docs) throws Exception {
 		System.gc();
 		String heapFileName = dumpHeap("/tmp/test-heapdump", true);
 		Pair<Long, Long> beforeStats = heapStats(heapFileName);
 
-		//		MemoryMXBean mbean = ManagementFactory.getMemoryMXBean();
-//		long startUsed, stopUsed;
-//		startUsed = mbean.getHeapMemoryUsage().getUsed();
-
 		long start = System.nanoTime();
 		int nlines = 0;
 		long nchar = 0;
-		LL_required = 0;
 		for (InputDocument doc : docs) {
 			if ( wipeFileDFA ) { // wipe DFA for lexer/parser before each file parse?
 				wipe();
@@ -190,17 +180,15 @@ class TestANTLR4 {
 		long stop = System.nanoTime();
 		long tms = (long)((stop - start) / (1000.0 * 1000.0));
 		double ts = tms / 1000.0;
-//		stopUsed = mbean.getHeapMemoryUsage().getUsed();
-//		long heapUsed = stopUsed - startUsed;
 
 		System.gc();
 		heapFileName = dumpHeap("/tmp/test-heapdump", true);
 		Pair<Long, Long> afterStats = heapStats(heapFileName);
 		Pair<Long, Long> stats = new Pair<>(afterStats.a - beforeStats.a, afterStats.b - beforeStats.b);
 
-		System.out.printf("Parsed %d files %,d lines %,d bytes in %4dms at %,9d lines/sec %,10d chars/sec, heap %,d, instances %,d\n",
+		System.out.printf("Parsed %d files %,d lines %,d bytes in %4dms at %,9d lines/sec %,10d chars/sec instances %,9d heap %,13d bytes\n",
 						  docs.size(), nlines, nchar, tms, (int)(nlines / ts), (int)(nchar/ts), stats.a, stats.b);
-		return stop - start;
+		return new Triple<>(stop - start, stats.a, stats.b);
 	}
 
 	/** Dump heap tracing (live or all) objects to a .hprof file.
@@ -219,6 +207,7 @@ class TestANTLR4 {
 		return fileName;
 	}
 
+	/** Return total instances, total heap size */
 	public static Pair<Long,Long> heapStats(String heapFileName) throws IOException {
 		Heap heap = HeapFactory.createFastHeap(new File(heapFileName));
 		HeapHistogram histogram = new HeapHistogram();
@@ -227,93 +216,6 @@ class TestANTLR4 {
 		}
 		return new Pair<>(histogram.getTotalCount(), histogram.getTotalSize());
 	}
-
-	// This method decides what action to take based on the type of
-	//   file we are looking at
-//	public void doFile(File f) throws Exception {
-//		// If this is a directory, walk each file/dir in that directory
-//		if (f.isDirectory()) {
-//			String files[] = f.list();
-//			for(int i=0; i < files.length; i++)
-//				doFile(new File(f, files[i]));
-//		}
-//
-//		// otherwise, if this is a good input file, parse it!
-//		else if ( f.getName().matches(inputFilePattern) &&
-//				  f.getName().indexOf('-')<0 ) // don't allow preprocessor files like ByteBufferAs-X-Buffer.java
-//		{
-//			parseFile(f.getAbsolutePath());
-//		}
-//	}
-
-	/*
-	public void parseRFile(InputDocument doc) throws Exception {
-		String fileName = doc.fileName;
-		if ( showFileNames ) System.out.println(fileName);
-		ANTLRInputStream input = new ANTLRInputStream(doc.content, doc.content.length);
-
-		RLexer lexer = new RLexer(input);
-		CommonTokenStream tokens = new CommonTokenStream(lexer);
-		if ( showTokens ) {
-			tokens.fill();
-			for (Object tok : tokens.getTokens()) {
-				System.out.println(tok);
-			}
-		}
-
-		RFilter filter = new RFilter(tokens);
-		filter.stream(); // call start rule: stream
-		tokens.reset();
-
-		RParser parser = new RParser(tokens);
-
-		ParserATNSimulator sim = parser.getInterpreter();
-		if ( nodfa && parserClass == JavaParser.class ) {
-			sim = new ParserATNSimulator(parser, JavaParser._ATN,
-										 JavaParser._decisionToDFA,
-										 JavaParser._sharedContextCache)
-			{
-				@Override
-				public int adaptivePredict(@NotNull TokenStream input, int decision, @Nullable ParserRuleContext outerContext) {
-					int alt = super.adaptivePredict(input, decision, outerContext);
-					DFA dfa = decisionToDFA[decision];
-					dfa.s0 = null;
-					return alt;
-				}
-			};
-		}
-		parser.setInterpreter(sim);
-		parser.setBuildParseTree(buildTrees); // no parse trees
-		parser.getInterpreter().setPredictionMode(PredictionMode.SLL);
-		parser.setErrorHandler(new BailErrorStrategy());
-		parser.removeErrorListeners();
-		parser.setBuildParseTree(false);
-
-		long start, stop;
-		start = System.nanoTime();
-		try {
-			parser.prog();
-		}
-		catch (ParseCancellationException ex) {
-			tokens.reset(); // rewind input stream
-			parser.reset();
-			// back to standard listeners/handlers
-			parser.addErrorListener(ConsoleErrorListener.INSTANCE);
-			parser.setErrorHandler(new DefaultErrorStrategy());
-			parser.getInterpreter().setPredictionMode(PredictionMode.LL);
-
-			parser.prog();
-			// if we parse ok, it's LL not SLL
-			if ( parser.getNumberOfSyntaxErrors()==0 ) {
-				LL_required++;
-			}
-		}
-		finally {
-			stop = System.nanoTime();
-		}
-		doc.time = stop - start;
-	}
-*/
 
 	public void parseFile(InputDocument doc) throws Exception {
 		String fileName = doc.fileName;
@@ -339,10 +241,10 @@ class TestANTLR4 {
 
 		ParserATNSimulator sim = parser.getInterpreter();
 		parser.setInterpreter(sim);
-		parser.setBuildParseTree(buildTrees); // no parse trees
+		parser.setBuildParseTree(buildTrees); // no parse trees?
 		Method startRule = parserClass.getMethod(startRuleName);
 		parser.getInterpreter().setPredictionMode(PredictionMode.SLL);
-		parser.setErrorHandler(new BailErrorStrategy());
+		parser.setErrorHandler(new BailErrorStrategy());  // SQL has lots of errors ;)
 		parser.removeErrorListeners();
 
 		if ( showDocTiming ) {
@@ -355,6 +257,7 @@ class TestANTLR4 {
 			startRule.invoke(parser, (Object[]) null);
 		}
 		catch (InvocationTargetException ex) {
+			// gotta try full SLL if we failed with SLL
 			if ( ex.getCause() instanceof ParseCancellationException) {
 				tokens.reset(); // rewind input stream
 				parser.reset();
@@ -366,7 +269,7 @@ class TestANTLR4 {
 				startRule.invoke(parser, (Object[])null);
 				// if we parse ok, it's LL not SLL
 				if ( parser.getNumberOfSyntaxErrors()==0 ) {
-					LL_required++;
+//					System.out.println("LL required");
 				}
 			}
 		}
@@ -378,45 +281,6 @@ class TestANTLR4 {
 	        doc.afterDFASize = getDFASize(parser);
 		}
     }
-
-	// Here's where we do the real work...
-//	public static void parseFile(String f)
-//		throws Exception {
-//		try {
-//			// Create a scanner that reads from the input stream passed to us
-//			if ( lexer==null ) {
-//				lexer = new CLexer();
-//			}
-//			lexer.setCharStream(new ANTLRFileStream(f));
-//			CommonTokenStream tokens = new CommonTokenStream();
-////			tokens.discardOffChannelTokens(true);
-//			tokens.setTokenSource(lexer);
-//			long start = System.currentTimeMillis();
-//			tokens.LT(1); // force load
-//			long stop = System.currentTimeMillis();
-//			lexerTime += stop-start;
-//
-//			/*
-//			long t1 = System.currentTimeMillis();
-//			tokens.LT(1);
-//			long t2 = System.currentTimeMillis();
-//			System.out.println("lexing time: "+(t2-t1)+"ms");
-//			*/
-//			//System.out.println(tokens);
-//
-//			// Create a parser that reads from the scanner
-//			CParser parser = null;
-//			parser = new CParser(tokens);
-//
-//			// start parsing at the compilationUnit rule
-//			parser.translation_unit();
-//			//System.err.println("finished "+f);
-//		}
-//		catch (Exception e) {
-//			System.err.println("parser exception: "+e);
-//			e.printStackTrace();   // so we can get stack trace
-//		}
-//	}
 
 	public List<String> getFilenames(File f) throws Exception {
 		List<String> files = new ArrayList<String>();
@@ -447,7 +311,6 @@ class TestANTLR4 {
 		for (String f : fileNames) {
 			input.add(load(f));
 		}
-		System.out.println(input.size()+" files");
 		return input;
 	}
 
@@ -529,7 +392,7 @@ class TestANTLR4 {
 		}
 	}
 
-	void loadLexerParser() throws Exception {
+	void loadLexerAndParser() throws Exception {
 //		System.out.println("exec "+grammarName+"."+startRuleName);
 		String lexerName = grammarName+"Lexer";
 		ClassLoader cl = Thread.currentThread().getContextClassLoader();
