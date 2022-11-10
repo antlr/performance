@@ -69,6 +69,8 @@ class TestANTLR4 {
 	public String inputFilePattern = ".*\\.c";
 	public boolean showTokens, showFileNames, wipeDFA, wipeFileDFA, showDocTiming, buildTrees=false, nodfa=false;
 	public int ntimes = 1;
+	public static int skip = 3;
+
 
 	public List<Long> timings = new ArrayList<Long>();
 	public List<Long> liveHeapInstanceCounts = new ArrayList<Long>();
@@ -80,6 +82,7 @@ class TestANTLR4 {
 		new Option("showTokens",	"-tokens", "show input tokens"),
 		new Option("showDocTiming",	"-timing", "dump time in ms to parse each file"),
 		new Option("ntimes", "-n", OptionArgType.INT, "parse input n times w/o wiping DFA cache"),
+		new Option("skip", "-skip", OptionArgType.INT, "how many runs to skip to allow JIT to warm up"),
 		new Option("wipeDFA", "-wipedfa", "wipe DFA before each lex/parse pass"),
 		new Option("wipeFileDFA", "-wipefiledfa", "wipe DFA before each lex/parse of a file"),
 		new Option("nodfa", "-nodfa", "don't use DFA lookahead cache"),
@@ -135,13 +138,13 @@ class TestANTLR4 {
 			}
 		}
 
-		// skip first 2 for compiler
-		if ( timings.size()>3 ) {
-			timings = timings.subList(3, timings.size());
+		// skip first few for compiler
+		if ( timings.size()> skip) {
+			timings = timings.subList(skip, timings.size());
 		}
 		double mean = avg(timings);
 		double timingStd = std(mean, timings);
-		System.out.printf("average parse %.3fms, min %.3fms, stddev=%.3fms (First 3 runs skipped for JIT warmup)\n", mean, (minTime / (1000.00 * 1000.00)), timingStd);
+		System.out.printf("average parse %.3fms, min %.3fms, stddev=%.3fms (First %d runs skipped for JIT warmup)\n", mean, (minTime / (1000.00 * 1000.00)), timingStd, skip);
 	}
 
 	public double avg(List<Long> values) {

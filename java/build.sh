@@ -1,4 +1,4 @@
-ANTLR_JAR="`pwd`/lib/antlr-4.10.1-complete.jar"
+ANTLR_JAR="`pwd`/lib/antlr-4.11.2-SNAPSHOT-complete.jar"
 HEAP_JAR="`pwd`/lib/hprof-heap-0.16.jar"
 BASE=`pwd`
 
@@ -13,6 +13,7 @@ rm -rf /tmp/grammars-v4-master
 unzip -q grammars-v4.zip
 cd $BASE
 echo "Copy sample grammars and input"
+rm -rf grammars
 mkdir grammars
 cp /tmp/grammars-v4-master/java/java/*.g4 \
    /tmp/grammars-v4-master/sql/postgresql/*.g4 \
