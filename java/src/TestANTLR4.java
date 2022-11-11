@@ -34,9 +34,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 
 /** Parse a file or directory of files using the generated parser
  *  ANTLR builds from a grammar.
@@ -68,21 +66,18 @@ class TestANTLR4 {
 
 	public String inputFilePattern = ".*\\.c";
 	public boolean showTokens, showFileNames, wipeDFA, wipeFileDFA, showDocTiming, buildTrees=false, nodfa=false;
-	public int ntimes = 1;
-	public static int skip = 3;
-
-
-	public List<Long> timings = new ArrayList<Long>();
-	public List<Long> liveHeapInstanceCounts = new ArrayList<Long>();
-	public List<Long> liveHeapSizes = new ArrayList<Long>();
+	public int nbatches = 5;
+	public int batchSize = 5;
+	public static int skip = 1;
 
 	public static Option[] optionDefs = {
 		new Option("inputFilePattern",	"-files", OptionArgType.STRING, "input files; e.g., '.*\\\\.java'"),
 		new Option("showFileNames",	"-showfiles", "show file names as they are parsed"),
 		new Option("showTokens",	"-tokens", "show input tokens"),
 		new Option("showDocTiming",	"-timing", "dump time in ms to parse each file"),
-		new Option("ntimes", "-n", OptionArgType.INT, "parse input n times w/o wiping DFA cache"),
-		new Option("skip", "-skip", OptionArgType.INT, "how many runs to skip to allow JIT to warm up"),
+		new Option("nbatches", "-nbatches", OptionArgType.INT, "run how many trials"),
+		new Option("batchSize", "-batchsize", OptionArgType.INT, "parse input n times w/o wiping DFA cache"),
+		new Option("skip", "-skip", OptionArgType.INT, "how many batches to skip to allow JIT to warm up"),
 		new Option("wipeDFA", "-wipedfa", "wipe DFA before each lex/parse pass"),
 		new Option("wipeFileDFA", "-wipefiledfa", "wipe DFA before each lex/parse of a file"),
 		new Option("nodfa", "-nodfa", "don't use DFA lookahead cache"),
@@ -94,8 +89,6 @@ class TestANTLR4 {
 	List<String> inputFiles = new ArrayList<String>();
 	Class<? extends Lexer> lexerClass;
 	Class<? extends Parser> parserClass;
-
-	List<InputDocument> documents;
 
 	public static void main(String[] args) throws Exception {
 		TestANTLR4 tester = new TestANTLR4();
@@ -116,55 +109,69 @@ class TestANTLR4 {
 		}
 		loadLexerAndParser();
 		List<InputDocument> docs = load(allFiles);
-		long minTime = Long.MAX_VALUE;
-		for (int i=1; i<=ntimes; i++) {
+
+		List<Double> batchAverages = new ArrayList<>();
+		for (int i = 0; i < nbatches; i++) {
+			System.out.printf("BATCH %d\n", i+1);
+			List<Long> timings = runBatch(docs, batchSize);
+			long minTime = Collections.min(timings);
+			// timing info will show results of last pass over documents
+			if ( showDocTiming ) {
+				for (InputDocument doc : docs) {
+					System.out.printf("%d %d %d %d %s\n",
+							doc.content.length, doc.time, doc.beforeDFASize, doc.afterDFASize, doc.fileName);
+				}
+			}
+
+			double mean = avg(timings);
+			double timingStd = std(mean, timings);
+			System.out.printf("average parse %.3fms, min %.3fms, stddev=%.3fms (First %d runs skipped for JIT warmup)\n", mean, (minTime / (1000.00 * 1000.00)), timingStd, skip);
+			batchAverages.add(mean);
+		}
+
+		// skip first batch or a few for JIT compiler warmup
+		if ( batchAverages.size()> skip) {
+			batchAverages = batchAverages.subList(skip, batchAverages.size());
+		}
+
+		double overallAvg = avg(batchAverages);
+		double overallStd = std(overallAvg, batchAverages);
+		System.out.printf("Overall average parse %.3fms, stddev=%.3fms\n", overallAvg, overallStd);
+	}
+
+	/** Run a batch of trials and return the list of ms timings */
+	private List<Long> runBatch(List<InputDocument> docs, int batchSize) throws Exception {
+		List<Long> timings = new ArrayList<>();
+		for (int i=1; i<=batchSize; i++) {
 			if ( wipeDFA ) { // wipe DFA for lexer/parser before each pass?
 				wipe();
 			}
-			Triple<Long, Long, Long> stats = parseDocs(docs);
-			long time = stats.a;
-			long instances = stats.b;
-			long heapSize = stats.c;
-			minTime = Math.min(time, minTime);
+			Triple<Long, Long, Long> timeStats = runTrial(docs);
+			long time = timeStats.a;
 			timings.add((long)(time/1000.0/1000.0)); // get into ms
-			liveHeapInstanceCounts.add(instances);
-			liveHeapSizes.add(heapSize);
 		}
-		// timing info will show results of last pass over documents
-		if ( showDocTiming ) {
-			for (InputDocument doc : docs) {
-				System.out.printf("%d %d %d %d %s\n",
-								  doc.content.length, doc.time, doc.beforeDFASize, doc.afterDFASize, doc.fileName);
-			}
-		}
-
-		// skip first few for compiler
-		if ( timings.size()> skip) {
-			timings = timings.subList(skip, timings.size());
-		}
-		double mean = avg(timings);
-		double timingStd = std(mean, timings);
-		System.out.printf("average parse %.3fms, min %.3fms, stddev=%.3fms (First %d runs skipped for JIT warmup)\n", mean, (minTime / (1000.00 * 1000.00)), timingStd, skip);
+		return timings;
 	}
 
-	public double avg(List<Long> values) {
+	public <T extends Number> double avg(List<T> values) {
 		double sum = 0.0;
-		for (Long v : values) {
-			sum += v;
+		for (T v : values) {
+			sum += v.doubleValue();
 		}
 		return sum / values.size();
 	}
 
-	public double std(double mean, List<Long> values) { // unbiased std dev
+	public <T extends Number> double std(double mean, List<T> values) { // unbiased std dev
 		double sum = 0.0;
-		for (Long v : values) {
-			sum += (v-mean)*(v-mean);
+		for (T v : values) {
+			double d = v.doubleValue() - mean;
+			sum += d * d;
 		}
 		return Math.sqrt(sum / (values.size() - 1));
 	}
 
-	// return num ns to parse all docs
-	public Triple<Long, Long, Long> parseDocs(List<InputDocument> docs) throws Exception {
+	/** return num ns to parse all docs */
+	public Triple<Long, Long, Long> runTrial(List<InputDocument> docs) throws Exception {
 		System.gc();
 		String heapFileName = dumpHeap("/tmp/test-heapdump", true);
 		Pair<Long, Long> beforeStats = heapStats(heapFileName);
@@ -187,11 +194,11 @@ class TestANTLR4 {
 		System.gc();
 		heapFileName = dumpHeap("/tmp/test-heapdump", true);
 		Pair<Long, Long> afterStats = heapStats(heapFileName);
-		Pair<Long, Long> stats = new Pair<>(afterStats.a - beforeStats.a, afterStats.b - beforeStats.b);
+		Pair<Long, Long> heapStats = new Pair<>(afterStats.a - beforeStats.a, afterStats.b - beforeStats.b);
 
 		System.out.printf("Parsed %d files %,d lines %,d bytes in %4dms at %,9d lines/sec %,10d chars/sec instances %,9d heap %,13d bytes\n",
-						  docs.size(), nlines, nchar, tms, (int)(nlines / ts), (int)(nchar/ts), stats.a, stats.b);
-		return new Triple<>(stop - start, stats.a, stats.b);
+						  docs.size(), nlines, nchar, tms, (int)(nlines / ts), (int)(nchar/ts), heapStats.a, heapStats.b);
+		return new Triple<>(stop - start, heapStats.a, heapStats.b);
 	}
 
 	/** Dump heap tracing (live or all) objects to a .hprof file.
